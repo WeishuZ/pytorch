@@ -102,9 +102,6 @@ class CommonTemplate:
         self.common(fn, (x,), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True, alignment_asserts=True)
-    @skip_if_cpp_wrapper(
-        "Inductor does not generate alignment assertion for cpp_wrapper right now"
-    )
     def test_incorrect_meta_for_custom_op_2d(self):
         def slice2d(x):
             return (3 * x)[..., 1:-15]
@@ -122,8 +119,14 @@ class CommonTemplate:
 
         x = torch.randn(1024, 1024 + 16, device=self.device)
 
-        expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
-        with self.assertRaisesRegex(AssertionError, expected_error):
+        if config.cpp_wrapper:
+            expected_error = "expected buf0 to be 16-byte aligned"
+            error_type = RuntimeError
+        else:
+            expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
+            error_type = AssertionError
+
+        with self.assertRaisesRegex(error_type, expected_error):
             self.common(fn, (x,), check_lowp=False)
 
     def test_slice(self):

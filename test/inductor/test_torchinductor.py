@@ -14732,10 +14732,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 r"raise RuntimeError\('u.* >= 0'\)"
             ).run(code[0])
 
-    @unittest.skipIf(
-        config.cpp_wrapper,
-        "Inductor does not generate size/stride asserts for cpp_wrapper",
-    )
     @lowering.force_fallback(aten.sort.default)
     def test_size_asserts_for_multi_output_fallback(self):
         @torch.compile
@@ -14745,7 +14741,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(16, 32, device=self.device)
         code = run_and_get_triton_code(f, x)
 
-        if is_dynamic_shape_enabled():
+        if config.cpp_wrapper:
+            FileCheck().check("// assert_size_stride for buf1").check(
+                "// assert_size_stride for buf2"
+            ).run(code)
+        elif is_dynamic_shape_enabled():
             FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1)").check(
                 "assert_size_stride(buf2, (s77, s27), (s27, 1)"
             ).run(code)

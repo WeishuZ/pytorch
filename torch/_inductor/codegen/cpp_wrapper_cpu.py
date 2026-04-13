@@ -24,7 +24,13 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
 from ..ir import ExternKernel
-from ..utils import _align, DeferredLineBase, LineContext, normalize_name
+from ..utils import (
+    _align,
+    DeferredLineBase,
+    GPU_ALIGN_BYTES,
+    LineContext,
+    normalize_name,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -688,6 +694,64 @@ class CppWrapperCpu(PythonWrapperCodegen):
         code.writeline(f"int32_t {name}_device_type;")
         code.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
+        )
+
+    def codegen_cpp_size_stride_assert(
+        self,
+        name: str,
+        sizes: Sequence[sympy.Expr],
+        strides: Sequence[sympy.Expr],
+        op_name: str,
+    ) -> None:
+        self.prefix.writeline(f"// assert_size_stride for {name} ({op_name})")
+        self.codegen_input_size_var_decl(self.prefix, name)
+        self.codegen_input_stride_var_decl(self.prefix, name)
+        for dim_idx, dim_size in enumerate(sizes):
+            expected = cexpr(dim_size)
+            self.prefix.splice(
+                f"""
+                    if ({name}_size[{dim_idx}] != {expected}) {{
+                        std::stringstream ss;
+                        ss << "{op_name}: expected size[{dim_idx}]={expected}, but got "
+                           << {name}_size[{dim_idx}];
+                        throw std::runtime_error(ss.str());
+                    }}
+                """
+            )
+        for dim_idx, dim_stride in enumerate(strides):
+            expected = cexpr(dim_stride)
+            self.prefix.splice(
+                f"""
+                    if ({name}_stride[{dim_idx}] != {expected}) {{
+                        std::stringstream ss;
+                        ss << "{op_name}: expected stride[{dim_idx}]={expected}, but got "
+                           << {name}_stride[{dim_idx}];
+                        throw std::runtime_error(ss.str());
+                    }}
+                """
+            )
+
+    def codegen_cpp_alignment_assert(
+        self,
+        name: str,
+        aligned: bool,
+        op_name: str,
+    ) -> None:
+        self.prefix.writeline(f"// assert_alignment for {name} ({op_name})")
+        if not aligned:
+            self.prefix.writeline(
+                f"// buffer {name} (op: {op_name}) is assumed to be not aligned"
+            )
+            return
+
+        self.prefix.splice(
+            f"""
+                if ((reinterpret_cast<size_t>({name}.data_ptr()) % {GPU_ALIGN_BYTES}) != 0) {{
+                    std::stringstream ss;
+                    ss << "{op_name}: expected {name} to be {GPU_ALIGN_BYTES}-byte aligned";
+                    throw std::runtime_error(ss.str());
+                }}
+            """
         )
 
     def codegen_additional_funcs(self):

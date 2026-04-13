@@ -7007,30 +7007,49 @@ class ExternKernel(InputsKernel):
         return op_name
 
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.size_asserts and not V.graph.cpp_wrapper:
-            # comparing strides for 0 size tensor is tricky. Ignore them for now.
-            if sympy_product(self.get_size()) == 0:
-                return
-            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-            op_name = self.get_op_name()
-            wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
+        if not config.size_asserts:
+            return
+
+        # comparing strides for 0 size tensor is tricky. Ignore them for now.
+        if sympy_product(self.get_size()) == 0:
+            return
+
+        op_name = self.get_op_name()
+        if V.graph.cpp_wrapper and hasattr(wrapper, "codegen_cpp_size_stride_assert"):
+            wrapper.codegen_cpp_size_stride_assert(
+                self.get_name(),
+                self.get_size(),
+                self.get_stride(),
+                op_name,
             )
+            return
+
+        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+        wrapper.writeline(
+            f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
+        )
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts and not V.graph.cpp_wrapper:
-            name = self.get_name()
-            aligned = name not in V.graph.unaligned_buffers
-            op_name = self.get_op_name()
-            if aligned:
-                wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
-                )
-            else:
-                wrapper.writeline(
-                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
-                )
+        if not config.alignment_asserts:
+            return
+
+        name = self.get_name()
+        aligned = name not in V.graph.unaligned_buffers
+        op_name = self.get_op_name()
+
+        if V.graph.cpp_wrapper and hasattr(wrapper, "codegen_cpp_alignment_assert"):
+            wrapper.codegen_cpp_alignment_assert(name, aligned, op_name)
+            return
+
+        if aligned:
+            wrapper.writeline(
+                f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+            )
+        else:
+            wrapper.writeline(
+                f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+            )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
         """
