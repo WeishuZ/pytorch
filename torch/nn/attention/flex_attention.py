@@ -450,6 +450,21 @@ def _closure_contents(fn: object) -> tuple[object, ...]:
     return tuple(cell.cell_contents for cell in closure)
 
 
+def _has_tensor_bound_partial_args(fn: object) -> bool:
+    if not isinstance(fn, functools.partial):
+        return False
+
+    for arg in fn.args:
+        if isinstance(arg, Tensor):
+            return True
+
+    for arg in fn.keywords.values() if fn.keywords is not None else ():
+        if isinstance(arg, Tensor):
+            return True
+
+    return False
+
+
 class _MaskModWrapper:
     """Wraps a mask_mod function with value-based equality.
 
@@ -1030,6 +1045,14 @@ class BlockMask:
     @staticmethod
     def _wrap_context_value(attr: str, value: Any) -> Any:
         if attr == "mask_mod":
+            if _has_tensor_bound_partial_args(value):
+                _warn_once(
+                    "block_mask_partial_mask_mod_make_fx",
+                    "BlockMask.mask_mod is a functools.partial with Tensor-bound arguments. "
+                    "When using make_fx/non-strict tracing, replay may capture the original bound "
+                    "tensors instead of new ones. Prefer a closure-style mask_mod that closes over "
+                    "Tensor inputs.",
+                )
             return _MaskModWrapper(value)
         return value
 
