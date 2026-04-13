@@ -960,6 +960,15 @@ class CompileTestCPU(TestCase):
         self._test_inductor_all_reduce_cpu(cpp_wrapper=False)
         self._test_inductor_all_reduce_cpu(cpp_wrapper=True)
 
+    @fresh_cache()
+    def test_dynamo_all_gather_tensor_nonzero_gather_dim(self):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            return funcol.wait_tensor(funcol.all_gather_tensor(arg, 1, "0"))
+
+        arg = torch.rand(2, 4)
+        compiled = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(arg), func(arg))
+
 
 class CompileTest(TestCase):
     def setUp(self):
